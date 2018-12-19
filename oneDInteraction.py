@@ -99,6 +99,25 @@ def calc_U(xpts, phi_a, phi_b, rbind=0.1, ubind=0.0, chi_aa=0.0, chi_pp=0.0,
     U_a = U_a + chi_aa*phi_a
     return [U_a, U_b]
 
+def energy_terms(phi_a, phi_b, chi_pp, chi_aa, ubind, rbind, xpts, spherical,
+                 reverse_x, maxX):
+    out = {}
+    if spherical:
+        out['chi_pp'] = np.sum(4*np.pi*(xpts**2)*chi_pp*((phi_a+phi_b)**2))
+        out['chi_aa'] = np.sum(4*np.pi*(xpts**2)*chi_aa*(phi_a**2))
+    else:
+        out['chi_pp'] = np.sum(chi_pp*((phi_a+phi_b)**2))
+        out['chi_aa'] = np.sum(chi_aa*(phi_a**2))
+
+
+    if (reverse_x):
+        out['bind'] = np.sum((phi_a+phi_b)*ubind*(xpts>maxX-rbind))
+    else:
+        out['bind'] = np.sum((phi_a+phi_b)*ubind*(xpts<rbind))
+
+    return out
+
+
 def error_metric(phi_1, phi_2, spherical=False, xpts=None):
     """Quntify difference between two density profiles
     Roughly the average fractional deviation between between phi_1 and phi_2.
@@ -146,7 +165,7 @@ def sorted_eig(M,top=False,power_iteration=False, guess=None, min_cycles=100,
     eig_vecs = eig_vecs[:, sort_perm]
     return [eig_vals, eig_vecs]
 
-def progression(params_0,delta_params,n_samples):
+def progression(params_0, delta_params, n_samples, save_history=False):
     parameters = {}
     u_constants = {}
     u_args ={'rbind', 'ubind', 'chi_aa', 'chi_pp', 'equ_of_state', 'reverse_x',
@@ -163,6 +182,7 @@ def progression(params_0,delta_params,n_samples):
         if key not in u_args and key not in iterate_args:
             raise ValueError(str(key)+" is not a keyward")
 
+    parameters['flagFail']=True
     samples = []
     for i_sample in range(n_samples):
         print("Takeing sameple ",i_sample," ...")
@@ -172,7 +192,7 @@ def progression(params_0,delta_params,n_samples):
             if key in iterate_args:
                 parameters[key] = params_0[key] + i_sample*delta_paras[key]
 
-        [xpts,history]=iterate(u_constants,**parameters)
+        [xpts,history,flagFail]=iterate(u_constants,**parameters)
 
         errors = []
         for ii in range(len(history)):
@@ -183,6 +203,10 @@ def progression(params_0,delta_params,n_samples):
                         'phi_b':history[-1]['phi_b'],
                         'errors':errors
                         })
+        if save_history:
+            samples[-1]['history'] = history
+        samples[-1]['failToConverg'] = flagFail
+
         # Save the changing arguement(s)
         for key in delta_params:
             if key in u_args:
@@ -196,14 +220,31 @@ def progression(params_0,delta_params,n_samples):
 
     return [xpts, samples]
 
+def run_iterate_once(params_0):
+    parameters = {}
+    u_constants = {}
+    u_args ={'rbind', 'ubind', 'chi_aa', 'chi_pp', 'equ_of_state', 'reverse_x',
+             'maxX'}
+    iterate_args = {'tolerence', 'cycles', 'R', 'b', 'basis_size', 'nxpts',
+            'fraction_A', 'fraction_B', 'fractional_update',
+            'accelerated_update', 'accelerate_level',
+            'spherical', 'init_phi_a', 'init_phi_b'}
+    for key in params_0:
+        if key in u_args:
+            u_constants[key] = params_0[key]
+        if key in iterate_args:
+            parameters[key] = params_0[key]
+        if key not in u_args and key not in iterate_args:
+            raise ValueError(str(key)+" is not a keyward")
 
+    return iterate(u_constants,**parameters)
 
 
 def iterate(u_constants, tolerence=0.005, cycles=100, R=1.0, b=0.05,
             basis_size=150, nxpts=450,
             fraction_A=0.01, fraction_B=0.01, fractional_update=0.05,
             accelerated_update=0.05, accelerate_level=0.001,
-            spherical=False, init_phi_a=None, init_phi_b=None):
+            spherical=False, init_phi_a=None, init_phi_b=None, flagFail=False):
     """Run SCFT proceedure
 
     Args:
@@ -279,17 +320,26 @@ def iterate(u_constants, tolerence=0.005, cycles=100, R=1.0, b=0.05,
             phi_a = phi_a*(1.0-fractional_update) + fractional_update*phi_a_new
             phi_b = phi_b*(1.0-fractional_update) + fractional_update*phi_b_new
 
-        history.append({'phi_a':phi_a, 'phi_b':phi_b, 'lam_a':lam_a,
-                        'lam_b':lam_b, 'U_a':U_a, 'U_b':U_b, 'M_a':M_a,
-                        '`M_b':M_b, 'a_a':a_a, 'a_b':a_b,
+        #history.append({'phi_a':phi_a, 'phi_b':phi_b, 'lam_a':lam_a,
+        #                'lam_b':lam_b, 'U_a':U_a, 'U_b':U_b, 'M_a':M_a,
+        #                '`M_b':M_b, 'a_a':a_a, 'a_b':a_b,
+        #                'error':error, 'phi_a_proposed':phi_a_new,
+        #                'phi_b_porposed':phi_b_new})
+        history.append({'phi_a':phi_a, 'phi_b':phi_b, 'U_a':U_a, 'U_b':U_b,
+                        'a_a':a_a, 'a_b':a_b,
                         'error':error, 'phi_a_proposed':phi_a_new,
                         'phi_b_porposed':phi_b_new})
+
         if error < tolerence:
-            return[xpts,history]
+            if flagFail:
+                return[xpts, history, False]
+            else:
+                return[xpts, history]
+    if flagFail:
+        return [xpts, history, True]
 
     if tolerence != None:
         warnings.warn("Failed to converge error metric = "+str(error))
-
     return [xpts, history]
 
 
