@@ -67,9 +67,9 @@ def plot_phase_progression(params_0, delta_params, samples, xpts, setType):
                                  plotparams['ubind'], plotparams['rbind'],
                                  xpts, plotparams['spherical'], plotparams['reverse_x'],
                                  plotparams['R'])
-        e_chi_pp.append(energy['chi_pp'])
-        e_chi_aa.append(energy['chi_aa'])
-        e_bind.append(energy['bind'])
+        e_chi_pp.append(energy['e_chi_pp'])
+        e_chi_aa.append(energy['e_chi_aa'])
+        e_bind.append(energy['e_bind'])
         fail_to_converg.append(sample['failToConverg'])
         xvals.append(sample[what_changed])
     e_chi_pp = np.array(e_chi_pp)
@@ -108,6 +108,65 @@ def plot_phase_progression(params_0, delta_params, samples, xpts, setType):
         plt.title(setType)
         plt.legend()
     plt.tight_layout()
+
+def get_value_matrix(params_0, delta_params,
+                                 all_data, xpts, to_get='e_bind'):
+    #----------------
+    #  Unpack energies from all_data
+    #----------------
+    to_get_matrix = []
+    for idy, [samples, params_n] in enumerate(all_data):
+        plotparams = params_n.copy()
+        to_get_seq = []
+        for idx, sample in enumerate(samples):
+            for key in delta_params:
+                plotparams[key] = params_0[key]+idx*delta_params[key]
+
+            if to_get in ['e_chi_pp','e_chi_aa','e_bind']:
+                energy = od.energy_terms(sample['phi_a'], sample['phi_b'],
+                                         plotparams['chi_pp'], plotparams['chi_aa'],
+                                         plotparams['ubind'], plotparams['rbind'],
+                                         xpts, plotparams['spherical'], plotparams['reverse_x'],
+                                         plotparams['R'])
+                to_get_seq.append(energy[to_get])
+            elif to_get in sample.keys():
+                to_get_seq.append(sample[to_get])
+            elif to_get in plotparams.keys():
+                to_get_seq.append(plotparams[to_get])
+            else:
+                raise ValueError(str(to_get)+" not found")
+        to_get_matrix.append(to_get_seq)
+    return to_get_matrix
+
+def multi_sweep_plot(params0, delta_params, all_data, xpts, xvar,yvar):
+    xMatrix = get_value_matrix(params0, delta_params, all_data, xpts,
+                               to_get=xvar)
+    yMatrix = get_value_matrix(params0, delta_params, all_data, xpts,
+                               to_get=yvar)
+    fMatrix = get_value_matrix(params0, delta_params, all_data, xpts,
+                               to_get='failToConverg')
+    colors = sns.cubehelix_palette(len(yMatrix))
+    for converge in [True, False]:
+        if converge:
+            marker = 'o'
+            linestyle = '-'
+        else:
+            marker = 'x'
+            linestyle = ' '
+        for isweep in range(len(all_data)):
+            ymasked = []
+            for ii, value in enumerate(yMatrix[isweep]):
+                if fMatrix[isweep][ii] == converge:
+                    ymasked.append(value)
+                else:
+                    ymasked.append(None)
+            plt.plot(xMatrix[isweep], ymasked, marker=marker,
+                     linestyle=linestyle, color=colors[isweep])
+    plt.xlabel(xvar)
+    plt.ylabel(yvar)
+    plt.tight_layout()
+    plt.show()
+
 
 def plot_a_density_samples(samples,xpts):
     colors = sns.cubehelix_palette(len(samples))
